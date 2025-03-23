@@ -1,0 +1,26 @@
+services:
+  iptv-recorder:
+    image: iptv-recorder:latest
+    build:
+      context: /mnt/user/appdata/enigmaToOculus
+      dockerfile: Dockerfile
+    network_mode: host
+    volumes:
+      - /mnt/user/DecoChannels:/output  # Salida de videos
+      - /mnt/user/appdata/enigmaToOculus/cache:/cache  # Caché persistente
+    environment:
+      - M3U_URL=http://192.168.1.100/web/services.m3u?bRef=1%3A7%3A1%3A0%3A0%3A0%3A0%3A0%3A0%3A0%3AFROM%20BOUQUET%20%22userbouquet.movistar_.tv%22%20ORDER%20BY%20bouquet&bName=Movistar%2B
+      - CHANNELS=TEST
+      - OUTPUT_DIR=/output
+    restart: unless-stopped
+    container_name: enigmaToOculus
+
+  frontend:
+    build:
+      context: /mnt/user/appdata/enigmaToOculus/frontend
+      dockerfile: Dockerfile
+    network_mode: host
+    depends_on:
+      - iptv-recorder
+    restart: unless-stopped
+    container_name: enigmaToOculus-frontend
