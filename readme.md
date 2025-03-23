@@ -222,17 +222,11 @@ El backend se configura mediante las siguientes variables de entorno:
    dotnet enigmaToOculus.dll
    ```
 
-5. **Instala y ejecuta el frontend** (ajusta según tu tecnología de frontend, por ejemplo, Node.js):
-
-   ```bash
-   cd frontend
-   npm install
-   npm start
-   ```
+5. **Abre el frontend**:
 
    Asegúrate de que el frontend esté configurado para escuchar en el puerto `6678`.
 
-6. **Verifica los logs**:
+6. **Verifica los logs en caso de error**:
 
    Revisa la salida en la consola del backend y del frontend para confirmar que ambos servicios están funcionando correctamente.
 
@@ -555,13 +549,8 @@ The backend is configured using the following environment variables:
    dotnet enigmaToOculus.dll
    ```
 
-5. **Install and run the frontend** (adjust based on your frontend technology, e.g., Node.js):
+5. **Open the frontend and enjoy**:
 
-   ```bash
-   cd frontend
-   npm install
-   npm start
-   ```
 
    Ensure the frontend is configured to listen on port `6678`.
 
