@@ -33,7 +33,7 @@ http://192.168.1.100:8001/1:0:1:76A3:41E:1:C00000:0:0:0:
 #EXTINF:-1 tvg-chno="30009" tvg-logo="http://192.168.1.100/picon/1_0_19_7539_426_1_C00000_0_0_0.png" tvg-id="1:0:19:7539:426:1:C00000:0:0:0:" tvg-name="M+ ESTRENOS HD",M+ ESTRENOS HD
 #EXTVLCOPT:program=30009
 http://192.168.1.100:8001/1:0:19:7539:426:1:C00000:0:0:0:
-#EXTINF:-1 tvg-chno="30902" tvg-logo="http://192.168.1.100/picon/1_0_19_78B6_3EC_1_C00000_0_0_0.png" tvg-id="1:0:19:78B6:3EC:1:C00000:0:0:0:" tvg-name="M+ SERIES HD",M+ SERIES HD
+#EXTINF:-1 tvg-chno="30902" tvg-logo="http://192.168.1.100/picon/1_0_19_78B6_3EC_1_C00000_0_0_0.png" tvg-id="1:0:19:78B6:3EC:1:C00000:0:0:0:" tvg-name="M+ HITS HD",M+ HITS HD
 #EXTVLCOPT:program=30902
 http://192.168.1.100:8001/1:0:19:78B6:3EC:1:C00000:0:0:0:
 #EXTINF:-1 tvg-chno="29964" tvg-logo="http://192.168.1.100/picon/1_0_19_750C_420_1_C00000_0_0_0.png" tvg-id="1:0:19:750C:420:1:C00000:0:0:0:" tvg-name="M+ Originales HD",M+ Originales HD

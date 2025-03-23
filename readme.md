@@ -1,230 +1,535 @@
 
-# EnigmaToOculus
+# EnigmaToOculus Backend
 
 ## Español
 
-### Objetivo de la Aplicación
+### Descripción
 
-**EnigmaToOculus** es una aplicación diseñada para facilitar la reproducción de listas IPTV en las Oculus Quest (u otros dispositivos de realidad virtual) a través de cualquier programa de reproducción compatible con streams IPTV. La aplicación obtiene una lista de canales IPTV desde el OpenWebif de un receptor Enigma2 (como un decodificador de satélite) y permite a los usuarios seleccionar un canal para iniciar su streaming. El stream se genera como un archivo `.ts` (MPEG-TS) que puede ser reproducido en tiempo real en las Oculus Quest mediante un reproductor compatible.
+Este proyecto es un backend diseñado para descargar listas de canales IPTV en formato M3U, parsearlas y transmitir los canales a través de GStreamer, sirviendo los streams a un frontend a través de un servidor HTTP. Soporta dos fuentes de listas M3U: una lista local (por ejemplo, desde un receptor Enigma2) y una lista abierta (por ejemplo, canales públicos de TDT).
 
-Características principales:
-- **Obtención de Canales**: Extrae la lista de canales IPTV desde el OpenWebif de un receptor Enigma2 a través de un archivo M3U.
-- **Interfaz Web Intuitiva**: Proporciona un frontend web donde los usuarios pueden ver la lista de canales, buscar canales por nombre y gestionar el streaming.
-- **Búsqueda Local**: Permite buscar canales por nombre directamente en el frontend, sin necesidad de recargar la página.
-- **Streaming para Oculus Quest**: Inicia el streaming de un canal seleccionado, generando un archivo `.ts` que puede ser reproducido en tiempo real en las Oculus Quest usando un reproductor compatible.
-- **Persistencia del Estado**: Al recargar la página, el frontend recuerda si hay un streaming activo y actualiza el estado de los botones.
-- **Botonera Fija**: Muestra una barra fija en la parte inferior de la pantalla cuando un canal está en reproducción, indicando el nombre del canal y ofreciendo un botón para detener el streaming.
+### Características
 
-Esta aplicación es ideal para usuarios que desean disfrutar de su lista IPTV en realidad virtual, aprovechando las capacidades de las Oculus Quest.
+- Descarga y parsea listas M3U desde dos fuentes:
+  - `M3U_URL`: Lista de canales desde un receptor Enigma2 (por ejemplo, `http://192.168.1.100/web/services.m3u?...`).
+  - `OPEN_M3U_URL`: Lista de canales abiertos (por ejemplo, `https://www.tdtchannels.com/lists/tv.m3u`).
+- Combina ambas listas en una sola, marcando los canales de la lista abierta con el sufijo `(open)` en el nombre.
+- Transmite canales usando GStreamer y genera archivos `.ts` para el frontend.
+- Proporciona un servidor HTTP con los siguientes endpoints:
+  - `/start?channel=<nombre_del_canal>`: Inicia el streaming de un canal.
+  - `/stop`: Detiene el streaming actual.
+  - `/status`: Devuelve el estado del streaming.
+  - `/channels`: Devuelve la lista completa de canales disponibles.
+- Cachea las listas M3U para usarlas en caso de fallos de red.
+- Maneja errores de descarga de listas M3U de manera robusta, permitiendo que el backend continúe funcionando incluso si una de las listas no está disponible.
 
-### Requerimientos
+### Requisitos previos
 
-#### Software
-- **Docker**: Necesario para construir y ejecutar los contenedores de la aplicación.
-- **Docker Compose**: Para gestionar los servicios (backend y frontend).
-- **GStreamer**: Utilizado por el backend para procesar los streams IPTV. Se incluye en la imagen de Docker del backend.
+- **Docker** (opcional, pero recomendado para una configuración más sencilla).
+- **GStreamer**: Necesario para la transmisión de los canales. Asegúrate de que `gst-launch-1.0` esté instalado en el sistema o en el contenedor Docker.
+  - En Ubuntu/Debian: `sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`
+- **.NET Core SDK** (si no usas Docker): Necesario para compilar y ejecutar el backend.
+- Acceso a internet para descargar la lista abierta (`OPEN_M3U_URL`).
+- Un receptor Enigma2 (como un decodificador de satélite) accesible en la red local para la lista `M3U_URL`.
 
-#### Variables de Entorno
-Debes configurar las siguientes variables de entorno en el archivo `docker-compose.yml` o en tu entorno:
+### Configuración
 
-- **M3U_URL**: URL del archivo M3U proporcionado por el OpenWebif del receptor Enigma2 (por ejemplo, la URL de la lista de canales de tu decodificador, como `http://<IP_DEL_DECODIFICADOR>/web/services.m3u`).
-- **OUTPUT_DIR**: Directorio donde se guardarán los archivos `.ts` generados (por ejemplo, `/output`).
+#### Variables de entorno
 
-#### Hardware
-- Un receptor Enigma2 (como un decodificador de satélite) con OpenWebif habilitado, que proporcione un archivo M3U con los canales IPTV.
-- Una red local donde el receptor Enigma2 y el host de la aplicación puedan comunicarse.
-- Un dispositivo Oculus Quest con un reproductor compatible con streams IPTV (por ejemplo, Bigscreen o MoonVR).
+El backend se configura mediante las siguientes variables de entorno:
 
-#### Rutas
-- La aplicación espera que los archivos del proyecto estén descomprimidos en una ruta específica. En las instrucciones, usaremos `/path/to/enigmaToOculus` como ejemplo.
-- Los archivos `.ts` generados se almacenarán en una carpeta compartida accesible por las Oculus Quest. En las instrucciones, usaremos `/path/to/DecoChannels` como ejemplo.
+| Variable        | Descripción                                                                 | Valor por defecto                          | Requerido |
+|-----------------|-----------------------------------------------------------------------------|--------------------------------------------|-----------|
+| `M3U_URL`       | URL de la lista M3U del receptor Enigma2 (por ejemplo, OpenWebif).          | Ninguno                                    | Sí        |
+| `OPEN_M3U_URL`  | URL de la lista M3U de canales abiertos.                                    | `https://www.tdtchannels.com/lists/tv.m3u` | No        |
+| `OUTPUT_DIR`    | Directorio donde se guardarán los archivos `.ts` generados por GStreamer.   | Ninguno                                    | Sí        |
+| `CHANNELS`      | Lista de canales deseados (separados por comas). **Nota**: Actualmente se ignora para incluir todos los canales. | Ninguno                                    | No        |
 
-### Cómo Ejecutar la Aplicación
+#### Configuración con Docker
 
-1. **Descomprimir el Proyecto**:
-   - Descarga y descomprime el archivo del proyecto en una ruta de tu sistema. Por ejemplo:
-     ```
-     /path/to/enigmaToOculus
-     ```
-   - Asegúrate de que los archivos del proyecto (como `Dockerfile`, `frontend/`, etc.) estén dentro de esta carpeta.
+1. **Crea un archivo `docker-compose.yml`**:
 
-2. **Configurar las Variables de Entorno y Rutas**:
-   Edita el archivo `docker-compose.yml` para incluir las variables de entorno y rutas necesarias. A continuación, se muestra un ejemplo:
    ```yaml
+   version: '3.8'
    services:
-     iptv-recorder:
-       image: iptv-recorder:latest
+     enigmaToOculus:
+       image: enigmaToOculus:latest
        build:
-         context: /path/to/enigmaToOculus
+         context: .
          dockerfile: Dockerfile
-       network_mode: host
-       volumes:
-         - /path/to/DecoChannels:/output  # Salida de videos
-         - /path/to/enigmaToOculus/cache:/cache  # Caché persistente
        environment:
-         - M3U_URL=http://<IP_DEL_DECODIFICADOR>/web/services.m3u  # URL de la lista de canales de tu decodificador
+         - M3U_URL=http://192.168.1.100/web/services.m3u?...
+         - OPEN_M3U_URL=https://www.tdtchannels.com/lists/tv.m3u
          - OUTPUT_DIR=/output
-       restart: unless-stopped
-       container_name: enigmaToOculus
-
-     frontend:
-       build:
-         context: /path/to/enigmaToOculus/frontend
-         dockerfile: Dockerfile
-       network_mode: host
-       depends_on:
-         - iptv-recorder
-       restart: unless-stopped
-       container_name: enigmaToOculus-frontend
+         - CHANNELS=  # Dejar vacío para incluir todos los canales
+       ports:
+         - "6677:6677"
+       volumes:
+         - ./cache:/cache
+         - ./output:/output
    ```
-   - Sustituye `/path/to/enigmaToOculus` por la ruta donde descomprimiste el proyecto.
-   - Sustituye `/path/to/DecoChannels` por la ruta donde deseas que se generen los archivos `.ts`. Esta carpeta debe ser una carpeta compartida accesible por las Oculus Quest (por ejemplo, mediante SMB o un servidor DLNA).
-   - Sustituye `http://<IP_DEL_DECODIFICADOR>/web/services.m3u` por la URL real de la lista de canales de tu decodificador Enigma2.
 
-3. **Construir y Ejecutar los Contenedores**:
-   Desde el directorio donde está el archivo `docker-compose.yml`, ejecuta:
+2. **Crea un archivo `Dockerfile`** (si no lo tienes):
+
+   ```dockerfile
+   # Usa una imagen base con .NET Core y GStreamer
+   FROM mcr.microsoft.com/dotnet/sdk:6.0 AS build
+   WORKDIR /app
+
+   # Instala GStreamer y dependencias
+   RUN apt-get update && apt-get install -y \
+       gstreamer1.0-tools \
+       gstreamer1.0-plugins-good \
+       gstreamer1.0-plugins-bad \
+       gstreamer1.0-plugins-ugly \
+       gstreamer1.0-libav \
+       && rm -rf /var/lib/apt/lists/*
+
+   # Copia el código fuente
+   COPY . .
+
+   # Compila el proyecto
+   RUN dotnet publish -c Release -o out
+
+   # Crea la imagen final
+   FROM mcr.microsoft.com/dotnet/aspnet:6.0
+   WORKDIR /app
+   COPY --from=build /app/out .
+
+   # Instala GStreamer en la imagen final
+   RUN apt-get update && apt-get install -y \
+       gstreamer1.0-tools \
+       gstreamer1.0-plugins-good \
+       gstreamer1.0-plugins-bad \
+       gstreamer1.0-plugins-ugly \
+       gstreamer1.0-libav \
+       && rm -rf /var/lib/apt/lists/*
+
+   # Expone el puerto del servidor HTTP
+   EXPOSE 6677
+
+   # Inicia el backend
+   ENTRYPOINT ["dotnet", "enigmaToOculus.dll"]
+   ```
+
+3. **Construye y ejecuta el contenedor**:
+
    ```bash
    docker-compose up --build -d
    ```
 
-4. **Acceder a la Aplicación**:
-   - Abre un navegador en un dispositivo dentro de la misma red (por ejemplo, tu PC o teléfono) y ve a `http://<IP_DEL_HOST>:6678` (por ejemplo, `http://192.168.1.25:6678` si tu host es `192.168.1.25`).
-   - Verás la interfaz web con la lista de canales.
+4. **Verifica los logs**:
 
-5. **Usar la Aplicación**:
-   - Usa el campo de búsqueda para filtrar canales por nombre.
-   - Haz clic en "Iniciar" para comenzar el streaming de un canal. El archivo `.ts` se generará en la carpeta compartida (por ejemplo, `/path/to/DecoChannels/LA_1.ts`).
-   - Mientras un canal se está reproduciendo, aparecerá una barra fija en la parte inferior del frontend con el nombre del canal y un botón "Parar".
-   - Haz clic en "Parar" (en la barra o en el canal) para detener el streaming.
-   - Si recargas la página, el estado del streaming se mantendrá.
+   ```bash
+   docker logs enigmaToOculus
+   ```
 
-6. **Reproducir el Stream en las Oculus Quest**:
-   - Asegúrate de que la carpeta `/path/to/DecoChannels` sea una carpeta compartida accesible por las Oculus Quest. Esto puede lograrse mediante:
-     - Un servidor DLNA (como MiniDLNA) para que las Oculus Quest puedan acceder a los archivos.
-     - Un recurso compartido de red (SMB) al que las Oculus Quest puedan conectarse.
-   - Abre un reproductor compatible en las Oculus Quest. Esta aplicación ha sido probada con:
-     - **Bigscreen**: Usando un contenedor MiniDLNA para compartir los archivos `.ts`.
-     - **MoonVR**: Accediendo al archivo `.ts` directamente desde un recurso compartido de red (SMB).
-   - Selecciona el archivo `.ts` generado (por ejemplo, `LA_1.ts`) desde el reproductor.
-   - ¡Disfruta del canal en tus Oculus Quest!
+   Deberías ver mensajes como:
+
+   ```
+   Descargando lista M3U desde http://192.168.1.100/web/services.m3u?...
+   Lista M3U descargada y cacheada.
+   Total de canales parseados desde OpenWebif: 191
+   Descargando lista M3U desde https://www.tdtchannels.com/lists/tv.m3u...
+   Lista M3U descargada y cacheada.
+   Total de canales parseados desde la lista abierta: X
+   Total de canales combinados: Y
+   Total de canales (sin filtrar): Y
+   Canales parseados:
+   - LA 1
+   - LA 2
+   - ANTENA 3
+   ...
+   - Channel 1 (open)
+   - Channel 2 (open)
+   ...
+   Servidor HTTP iniciado. Escuchando en http://*:6677/
+   ```
+
+#### Configuración sin Docker
+
+1. **Clona o copia el código fuente**:
+
+   Asegúrate de tener el código del backend en un directorio local.
+
+2. **Instala GStreamer**:
+
+   En Ubuntu/Debian:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+   ```
+
+3. **Configura las variables de entorno**:
+
+   En Linux:
+
+   ```bash
+   export M3U_URL="http://192.168.1.100/web/services.m3u?..."
+   export OPEN_M3U_URL="https://www.tdtchannels.com/lists/tv.m3u"
+   export OUTPUT_DIR="/path/to/output"
+   export CHANNELS=""
+   ```
+
+4. **Compila y ejecuta el backend**:
+
+   ```bash
+   dotnet build -c Release
+   cd bin/Release/net6.0
+   dotnet enigmaToOculus.dll
+   ```
+
+5. **Verifica los logs**:
+
+   Revisa la salida en la consola para confirmar que ambas listas se descargan y parsean correctamente.
+
+### Uso
+
+#### Endpoints del servidor HTTP
+
+El backend inicia un servidor HTTP en el puerto `6677`. Los siguientes endpoints están disponibles:
+
+- **GET `/start?channel=<nombre_del_canal>`**  
+  Inicia el streaming de un canal específico.  
+  - Ejemplo: `http://192.168.1.165:6677/start?channel=LA%201`  
+  - Respuesta: Ruta del archivo `.ts` generado (por ejemplo, `/output/LA_1.ts`).
+
+- **GET `/stop`**  
+  Detiene el streaming actual y elimina los archivos `.ts` generados.  
+  - Ejemplo: `http://192.168.1.165:6677/stop`  
+  - Respuesta: Mensaje de confirmación.
+
+- **GET `/status`**  
+  Devuelve el estado del streaming actual.  
+  - Ejemplo: `http://192.168.1.165:6677/status`  
+  - Respuesta (JSON):  
+    ```json
+    {
+      "isStreaming": true,
+      "channelName": "LA 1",
+      "startTime": "2025-03-23T12:34:56.789Z"
+    }
+    ```
+
+- **GET `/channels`**  
+  Devuelve la lista completa de canales disponibles (de ambas listas M3U).  
+  - Ejemplo: `http://192.168.1.165:6677/channels`  
+  - Respuesta (JSON):  
+    ```json
+    [
+      { "tvgName": "LA 1", "tvgLogo": "http://example.com/la1.png" },
+      { "tvgName": "ANTENA 3", "tvgLogo": "http://example.com/antena3.png" },
+      { "tvgName": "Channel 1 (open)", "tvgLogo": "http://example.com/channel1.png" },
+      ...
+    ]
+    ```
+
+#### Notas sobre las listas abiertas
+
+- Los canales de la lista `OPEN_M3U_URL` se identifican con el sufijo `(open)` en el nombre (por ejemplo, `Channel 1 (open)`).
+- Si la descarga de `OPEN_M3U_URL` falla, el backend continuará funcionando con los canales de `M3U_URL` y mostrará un mensaje de error en los logs.
+- Asegúrate de que la URL especificada en `OPEN_M3U_URL` sea accesible y contenga una lista M3U válida con el formato esperado:
+  ```
+  #EXTM3U
+  #EXTINF:-1 tvg-name="Channel 1" tvg-logo="http://example.com/logo.png",Channel 1
+  http://example.com/stream1
+  ```
+
+### Depuración
+
+Si encuentras problemas, revisa los logs del backend para identificar el error:
+
+- **Lista no descargada**:
+  ```
+  Error HTTP al descargar la lista M3U: The remote server returned an error: (404) Not Found.
+  Status Code: 404
+  ```
+  - Solución: Verifica que la URL (`M3U_URL` o `OPEN_M3U_URL`) sea correcta y accesible.
+
+- **Problemas de red**:
+  ```
+  Error general al descargar la lista M3U: A connection attempt failed...
+  ```
+  - Solución: Asegúrate de que el contenedor o máquina tenga acceso a internet.
+
+- **Lista vacía**:
+  ```
+  Total de canales parseados desde la lista abierta: 0
+  ```
+  - Solución: Descarga manualmente la lista M3U y verifica que tenga el formato correcto (`#EXTINF` con `tvg-name` y URLs válidas).
+
+### Contribuciones
+
+Si deseas contribuir al proyecto, por favor crea un *pull request* con tus cambios. Asegúrate de incluir pruebas y documentación para cualquier nueva funcionalidad.
+
+### Licencia
+
+Este proyecto está licenciado bajo la [Licencia MIT](LICENSE).
 
 ---
 
 ## English
 
-### Application Objective
+### Description
 
-**EnigmaToOculus** is an application designed to enable the playback of IPTV playlists on the Oculus Quest (or other virtual reality devices) using any compatible IPTV streaming player. The application retrieves an IPTV channel list from the OpenWebif of an Enigma2 receiver (such as a satellite decoder) and allows users to select a channel to start streaming. The stream is generated as a `.ts` (MPEG-TS) file, which can be played in real-time on the Oculus Quest using a compatible player.
+This project is a backend designed to download IPTV channel lists in M3U format, parse them, and stream the channels using GStreamer, serving the streams to a frontend via an HTTP server. It supports two M3U list sources: a local list (e.g., from an Enigma2 receiver) and an open list (e.g., public TDT channels).
 
-Main features:
-- **Channel Retrieval**: Extracts the IPTV channel list from the OpenWebif of an Enigma2 receiver via an M3U file.
-- **Intuitive Web Interface**: Provides a web frontend where users can view the channel list, search for channels by name, and manage streaming.
-- **Local Search**: Allows searching for channels by name directly in the frontend without reloading the page.
-- **Streaming for Oculus Quest**: Starts streaming a selected channel, generating a `.ts` file that can be played in real-time on the Oculus Quest using a compatible player.
-- **State Persistence**: Upon page reload, the frontend remembers if a stream is active and updates the button states accordingly.
-- **Fixed Control Bar**: Displays a fixed bar at the bottom of the screen when a channel is streaming, showing the channel name and offering a "Stop" button.
+### Features
 
-This application is ideal for users who want to enjoy their IPTV playlist in virtual reality, leveraging the capabilities of the Oculus Quest.
+- Downloads and parses M3U lists from two sources:
+  - `M3U_URL`: Channel list from an Enigma2 receiver (e.g., `http://192.168.1.100/web/services.m3u?...`).
+  - `OPEN_M3U_URL`: Open channel list (e.g., `https://www.tdtchannels.com/lists/tv.m3u`).
+- Combines both lists into a single one, marking channels from the open list with the suffix `(open)` in their names.
+- Streams channels using GStreamer and generates `.ts` files for the frontend.
+- Provides an HTTP server with the following endpoints:
+  - `/start?channel=<channel_name>`: Starts streaming a specific channel.
+  - `/stop`: Stops the current stream.
+  - `/status`: Returns the streaming status.
+  - `/channels`: Returns the full list of available channels.
+- Caches M3U lists for use in case of network failures.
+- Robustly handles M3U list download errors, allowing the backend to continue running even if one of the lists is unavailable.
 
-### Requirements
+### Prerequisites
 
-#### Software
-- **Docker**: Required to build and run the application containers.
-- **Docker Compose**: To manage the services (backend and frontend).
-- **GStreamer**: Used by the backend to process IPTV streams. It is included in the backend Docker image.
+- **Docker** (optional, but recommended for easier setup).
+- **GStreamer**: Required for streaming channels. Ensure `gst-launch-1.0` is installed on the system or in the Docker container.
+  - On Ubuntu/Debian: `sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`
+- **.NET Core SDK** (if not using Docker): Required to build and run the backend.
+- Internet access to download the open list (`OPEN_M3U_URL`).
+- An Enigma2 receiver (such as a satellite decoder) accessible on the local network for the `M3U_URL` list.
+
+### Setup
 
 #### Environment Variables
-You must configure the following environment variables in the `docker-compose.yml` file or in your environment:
 
-- **M3U_URL**: URL of the M3U file provided by the OpenWebif of the Enigma2 receiver (e.g., the URL of your decoder's channel list, such as `http://<DECODER_IP>/web/services.m3u`).
-- **OUTPUT_DIR**: Directory where the generated `.ts` files will be saved (e.g., `/output`).
+The backend is configured using the following environment variables:
 
-#### Hardware
-- An Enigma2 receiver (such as a satellite decoder) with OpenWebif enabled, providing an M3U file with the IPTV channels.
-- A local network where the Enigma2 receiver and the application host can communicate.
-- An Oculus Quest device with a player compatible with IPTV streams (e.g., Bigscreen or MoonVR).
+| Variable        | Description                                                                 | Default Value                              | Required |
+|-----------------|-----------------------------------------------------------------------------|--------------------------------------------|----------|
+| `M3U_URL`       | URL of the M3U list from the Enigma2 receiver (e.g., OpenWebif).            | None                                       | Yes      |
+| `OPEN_M3U_URL`  | URL of the open M3U channel list.                                           | `https://www.tdtchannels.com/lists/tv.m3u` | No       |
+| `OUTPUT_DIR`    | Directory where GStreamer-generated `.ts` files will be saved.              | None                                       | Yes      |
+| `CHANNELS`      | List of desired channels (comma-separated). **Note**: Currently ignored to include all channels. | None                                       | No       |
 
-#### Paths
-- The application expects the project files to be extracted to a specific path. In the instructions, we will use `/path/to/enigmaToOculus` as an example.
-- The generated `.ts` files will be stored in a shared folder accessible by the Oculus Quest. In the instructions, we will use `/path/to/DecoChannels` as an example.
+#### Setup with Docker
 
-### How to Run the Application
+1. **Create a `docker-compose.yml` file**:
 
-1. **Extract the Project**:
-   - Download and extract the project files to a path on your system. For example:
-     ```
-     /path/to/enigmaToOculus
-     ```
-   - Ensure the project files (such as `Dockerfile`, `frontend/`, etc.) are inside this folder.
-
-2. **Configure Environment Variables and Paths**:
-   Edit the `docker-compose.yml` file to include the necessary environment variables and paths. Below is an example:
    ```yaml
+   version: '3.8'
    services:
-     iptv-recorder:
-       image: iptv-recorder:latest
+     enigmaToOculus:
+       image: enigmaToOculus:latest
        build:
-         context: /path/to/enigmaToOculus
+         context: .
          dockerfile: Dockerfile
-       network_mode: host
-       volumes:
-         - /path/to/DecoChannels:/output  # Output directory for videos
-         - /path/to/enigmaToOculus/cache:/cache  # Persistent cache
        environment:
-         - M3U_URL=http://<DECODER_IP>/web/services.m3u  # URL of your decoder's channel list
+         - M3U_URL=http://192.168.1.100/web/services.m3u?...
+         - OPEN_M3U_URL=https://www.tdtchannels.com/lists/tv.m3u
          - OUTPUT_DIR=/output
-       restart: unless-stopped
-       container_name: enigmaToOculus
-
-     frontend:
-       build:
-         context: /path/to/enigmaToOculus/frontend
-         dockerfile: Dockerfile
-       network_mode: host
-       depends_on:
-         - iptv-recorder
-       restart: unless-stopped
-       container_name: enigmaToOculus-frontend
+         - CHANNELS=  # Leave empty to include all channels
+       ports:
+         - "6677:6677"
+       volumes:
+         - ./cache:/cache
+         - ./output:/output
    ```
-   - Replace `/path/to/enigmaToOculus` with the path where you extracted the project.
-   - Replace `/path/to/DecoChannels` with the path where you want the `.ts` files to be generated. This folder must be a shared folder accessible by the Oculus Quest (e.g., via SMB or a DLNA server).
-   - Replace `http://<DECODER_IP>/web/services.m3u` with the actual URL of your Enigma2 decoder's channel list.
 
-3. **Build and Run the Containers**:
-   From the directory containing the `docker-compose.yml` file, run:
+2. **Create a `Dockerfile`** (if you don’t already have one):
+
+   ```dockerfile
+   # Use a base image with .NET Core and GStreamer
+   FROM mcr.microsoft.com/dotnet/sdk:6.0 AS build
+   WORKDIR /app
+
+   # Install GStreamer and dependencies
+   RUN apt-get update && apt-get install -y \
+       gstreamer1.0-tools \
+       gstreamer1.0-plugins-good \
+       gstreamer1.0-plugins-bad \
+       gstreamer1.0-plugins-ugly \
+       gstreamer1.0-libav \
+       && rm -rf /var/lib/apt/lists/*
+
+   # Copy the source code
+   COPY . .
+
+   # Build the project
+   RUN dotnet publish -c Release -o out
+
+   # Create the final image
+   FROM mcr.microsoft.com/dotnet/aspnet:6.0
+   WORKDIR /app
+   COPY --from=build /app/out .
+
+   # Install GStreamer in the final image
+   RUN apt-get update && apt-get install -y \
+       gstreamer1.0-tools \
+       gstreamer1.0-plugins-good \
+       gstreamer1.0-plugins-bad \
+       gstreamer1.0-plugins-ugly \
+       gstreamer1.0-libav \
+       && rm -rf /var/lib/apt/lists/*
+
+   # Expose the HTTP server port
+   EXPOSE 6677
+
+   # Start the backend
+   ENTRYPOINT ["dotnet", "enigmaToOculus.dll"]
+   ```
+
+3. **Build and run the container**:
+
    ```bash
    docker-compose up --build -d
    ```
 
-4. **Access the Application**:
-   - Open a browser on a device within the same network (e.g., your PC or phone) and go to `http://<HOST_IP>:6678` (e.g., `http://192.168.1.25:6678` if your host is `192.168.1.25`).
-   - You will see the web interface with the list of channels.
+4. **Check the logs**:
 
-5. **Use the Application**:
-   - Use the search field to filter channels by name.
-   - Click "Start" to begin streaming a channel. The `.ts` file will be generated in the shared folder (e.g., `/path/to/DecoChannels/LA_1.ts`).
-   - While a channel is streaming, a fixed bar will appear at the bottom of the frontend with the channel name and a "Stop" button.
-   - Click "Stop" (either in the bar or on the channel) to stop the streaming.
-   - If you reload the page, the streaming state will be preserved.
+   ```bash
+   docker logs enigmaToOculus
+   ```
 
-6. **Play the Stream on the Oculus Quest**:
-   - Ensure the folder `/path/to/DecoChannels` is a shared folder accessible by the Oculus Quest. This can be achieved using:
-     - A DLNA server (e.g., MiniDLNA) to make the `.ts` files available.
-     - A network share (SMB) that the Oculus Quest can access.
-   - Open a compatible player on the Oculus Quest. This application has been tested with:
-     - **Bigscreen**: Using a MiniDLNA container to share the `.ts` files.
-     - **MoonVR**: Accessing the `.ts` file directly from a network share (SMB).
-   - Select the generated `.ts` file (e.g., `LA_1.ts`) from the player.
-   - Enjoy the channel on your Oculus Quest!
+   You should see messages like:
 
----
+   ```
+   Downloading M3U list from http://192.168.1.100/web/services.m3u?...
+   M3U list downloaded and cached.
+   Total channels parsed from OpenWebif: 191
+   Downloading M3U list from https://www.tdtchannels.com/lists/tv.m3u...
+   M3U list downloaded and cached.
+   Total channels parsed from the open list: X
+   Total combined channels: Y
+   Total channels (unfiltered): Y
+   Parsed channels:
+   - LA 1
+   - LA 2
+   - ANTENA 3
+   ...
+   - Channel 1 (open)
+   - Channel 2 (open)
+   ...
+   HTTP server started. Listening on http://*:6677/
+   ```
 
-## Notas Adicionales / Additional Notes
+#### Setup without Docker
 
-- Asegúrate de que el OpenWebif del receptor Enigma2 esté habilitado y que los canales no estén cifrados (o que el receptor los descifre correctamente).
-- Los archivos `.ts` generados se almacenan en la carpeta especificada (`/path/to/DecoChannels` en el ejemplo). Asegúrate de que esta carpeta sea accesible desde las Oculus Quest (por ejemplo, mediante un servidor DLNA o SMB).
-- Si encuentras problemas con el streaming (por ejemplo, el archivo `.ts` no se reproduce), verifica los logs del backend para depurar el problema con GStreamer.
+1. **Clone or copy the source code**:
 
-- Ensure that the OpenWebif of the Enigma2 receiver is enabled and that the channels are not encrypted (or that the receiver decrypts them correctly).
-- The generated `.ts` files are stored in the specified folder (`/path/to/DecoChannels` in the example). Ensure this folder is accessible from the Oculus Quest (e.g., via a DLNA or SMB server).
-- If you encounter issues with streaming (e.g., the `.ts` file does not play), check the backend logs to debug the issue with GStreamer.
+   Ensure you have the backend code in a local directory.
+
+2. **Install GStreamer**:
+
+   On Ubuntu/Debian:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+   ```
+
+3. **Set up environment variables**:
+
+   On Linux:
+
+   ```bash
+   export M3U_URL="http://192.168.1.100/web/services.m3u?..."
+   export OPEN_M3U_URL="https://www.tdtchannels.com/lists/tv.m3u"
+   export OUTPUT_DIR="/path/to/output"
+   export CHANNELS=""
+   ```
+
+4. **Build and run the backend**:
+
+   ```bash
+   dotnet build -c Release
+   cd bin/Release/net6.0
+   dotnet enigmaToOculus.dll
+   ```
+
+5. **Check the logs**:
+
+   Review the console output to confirm that both M3U lists are downloaded and parsed correctly.
+
+### Usage
+
+#### HTTP Server Endpoints
+
+The backend starts an HTTP server on port `6677`. The following endpoints are available:
+
+- **GET `/start?channel=<channel_name>`**  
+  Starts streaming a specific channel.  
+  - Example: `http://192.168.1.165:6677/start?channel=LA%201`  
+  - Response: Path to the generated `.ts` file (e.g., `/output/LA_1.ts`).
+
+- **GET `/stop`**  
+  Stops the current stream and deletes the generated `.ts` files.  
+  - Example: `http://192.168.1.165:6677/stop`  
+  - Response: Confirmation message.
+
+- **GET `/status`**  
+  Returns the current streaming status.  
+  - Example: `http://192.168.1.165:6677/status`  
+  - Response (JSON):  
+    ```json
+    {
+      "isStreaming": true,
+      "channelName": "LA 1",
+      "startTime": "2025-03-23T12:34:56.789Z"
+    }
+    ```
+
+- **GET `/channels`**  
+  Returns the full list of available channels (from both M3U lists).  
+  - Example: `http://192.168.1.165:6677/channels`  
+  - Response (JSON):  
+    ```json
+    [
+      { "tvgName": "LA 1", "tvgLogo": "http://example.com/la1.png" },
+      { "tvgName": "ANTENA 3", "tvgLogo": "http://example.com/antena3.png" },
+      { "tvgName": "Channel 1 (open)", "tvgLogo": "http://example.com/channel1.png" },
+      ...
+    ]
+    ```
+
+#### Notes on Open Lists
+
+- Channels from the `OPEN_M3U_URL` list are identified with the suffix `(open)` in their names (e.g., `Channel 1 (open)`).
+- If the download of `OPEN_M3U_URL` fails, the backend will continue running with the channels from `M3U_URL` and log an error message.
+- Ensure that the URL specified in `OPEN_M3U_URL` is accessible and contains a valid M3U list in the expected format:
+  ```
+  #EXTM3U
+  #EXTINF:-1 tvg-name="Channel 1" tvg-logo="http://example.com/logo.png",Channel 1
+  http://example.com/stream1
+  ```
+
+### Troubleshooting
+
+If you encounter issues, check the backend logs to identify the error:
+
+- **List not downloaded**:
+  ```
+  HTTP error downloading M3U list: The remote server returned an error: (404) Not Found.
+  Status Code: 404
+  ```
+  - Solution: Verify that the URL (`M3U_URL` or `OPEN_M3U_URL`) is correct and accessible.
+
+- **Network issues**:
+  ```
+  General error downloading M3U list: A connection attempt failed...
+  ```
+  - Solution: Ensure the container or machine has internet access.
+
+- **Empty list**:
+  ```
+  Total channels parsed from the open list: 0
+  ```
+  - Solution: Manually download the M3U list and verify it has the correct format (`#EXTINF` with `tvg-name` and valid URLs).
+
+### Contributing
+
+If you’d like to contribute to the project, please create a *pull request* with your changes. Be sure to include tests and documentation for any new features.
+
+### License
+
+This project is licensed under the [MIT License](LICENSE).
+

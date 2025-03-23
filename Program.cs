@@ -47,7 +47,7 @@ public class ProcessWrapper
 class Program
 {
     /// <summary>
-    /// HTTP client used for downloading the M3U playlist.
+    /// HTTP client used for downloading the M3U playlists.
     /// </summary>
     private static readonly HttpClient _httpClient = new HttpClient();
 
@@ -82,13 +82,13 @@ class Program
     private static string _currentUrl;
 
     /// <summary>
-    /// List of all parsed channels from the M3U file.
+    /// List of all parsed channels from both M3U files (OpenWebif and open list).
     /// </summary>
     private static System.Collections.Generic.List<Channel> _allChannels;
 
     /// <summary>
     /// Entry point of the application.
-    /// Initializes the environment, downloads the M3U playlist, and starts the HTTP server.
+    /// Initializes the environment, downloads the M3U playlists, and starts the HTTP server.
     /// </summary>
     /// <param name="args">Command-line arguments (not used).</param>
     /// <returns>A task representing the asynchronous operation.</returns>
@@ -98,38 +98,67 @@ class Program
         {
             // Retrieve environment variables
             string m3uUrl = Environment.GetEnvironmentVariable("M3U_URL") ?? throw new Exception("M3U_URL no definido");
-            string channelsEnv = Environment.GetEnvironmentVariable("CHANNELS") ?? throw new Exception("CHANNELS no definido");
+            string channelsEnv = Environment.GetEnvironmentVariable("CHANNELS") ?? ""; // Permitir que esté vacío
             _outputPath = Environment.GetEnvironmentVariable("OUTPUT_DIR") ?? throw new Exception("OUTPUT_DIR no definido");
-            string cachePath = Path.Combine("/cache", "channels.m3u");
+            // Retrieve the open list URL from environment variable, with a default fallback
+            string openListUrl = Environment.GetEnvironmentVariable("OPEN_M3U_URL") ?? "https://www.tdtchannels.com/lists/tv.m3u";
+            string cachePathOpenWebif = Path.Combine("/cache", "channels_openwebif.m3u");
+            string cachePathOpenList = Path.Combine("/cache", "channels_openlist.m3u");
 
-            // Parse desired channels from the CHANNELS environment variable
-            string[] desiredChannels = channelsEnv.Split(',').Select(c => c.Trim()).ToArray();
-            Console.WriteLine($"Canales deseados: {string.Join(", ", desiredChannels)}");
+            // Parse desired channels from the CHANNELS environment variable (not used since we don't want filtering)
+            string[] desiredChannels = channelsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(c => c.Trim()).ToArray();
+            if (desiredChannels.Length > 0)
+            {
+                Console.WriteLine($"Canales deseados (ignorados): {string.Join(", ", desiredChannels)}");
+            }
+            else
+            {
+                Console.WriteLine("No se especificaron canales deseados. Se usarán todos los canales disponibles.");
+            }
 
             // Ensure the cache directory exists
             Directory.CreateDirectory("/cache");
             Console.WriteLine("Directorio /cache creado o ya existe.");
 
-            // Download and parse all channels from the M3U URL
-            var allChannels = await DownloadAndParseM3u(m3uUrl, cachePath, desiredChannels);
-            _allChannels = allChannels;
-            Console.WriteLine($"Total de canales parseados: {allChannels.Count}");
+            // Initialize the combined channels list
+            _allChannels = new System.Collections.Generic.List<Channel>();
 
-            // Filter channels based on the desired channels list (not used for /start endpoint)
-            var filteredChannels = allChannels
-                .Where(c => desiredChannels.Any(dc => dc.Equals(c.TvgName, StringComparison.OrdinalIgnoreCase)))
-                .ToList();
-            Console.WriteLine($"Total de canales filtrados: {filteredChannels.Count}");
-
-            // Log if no matching channels are found
-            if (filteredChannels.Count == 0)
+            // Download and parse channels from the OpenWebif M3U URL
+            try
             {
-                Console.WriteLine("No se encontraron canales coincidentes en la lista filtrada.");
-                Console.WriteLine("Canales parseados:");
-                foreach (var channel in allChannels)
-                {
-                    Console.WriteLine($"- {channel.TvgName}");
-                }
+                var openWebifChannels = await DownloadAndParseM3u(m3uUrl, cachePathOpenWebif, desiredChannels, false);
+                Console.WriteLine($"Total de canales parseados desde OpenWebif: {openWebifChannels.Count}");
+                _allChannels.AddRange(openWebifChannels);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al procesar la lista de OpenWebif ({m3uUrl}): {ex.Message}");
+            }
+
+            // Download and parse channels from the open list M3U URL, marking them as (open)
+            try
+            {
+                var openListChannels = await DownloadAndParseM3u(openListUrl, cachePathOpenList, desiredChannels, true);
+                Console.WriteLine($"Total de canales parseados desde la lista abierta: {openListChannels.Count}");
+                _allChannels.AddRange(openListChannels);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al procesar la lista abierta ({openListUrl}): {ex.Message}");
+                Console.WriteLine("Continuando con la lista de OpenWebif únicamente...");
+            }
+
+            Console.WriteLine($"Total de canales combinados: {_allChannels.Count}");
+
+            // No aplicar filtrado (usar todos los canales)
+            var filteredChannels = _allChannels;
+            Console.WriteLine($"Total de canales (sin filtrar): {filteredChannels.Count}");
+
+            // Log all parsed channels for debugging
+            Console.WriteLine("Canales parseados:");
+            foreach (var channel in _allChannels)
+            {
+                Console.WriteLine($"- {channel.TvgName}");
             }
 
             // Ensure the output directory exists
@@ -150,7 +179,7 @@ class Program
     /// <summary>
     /// Starts an HTTP server to handle requests for starting/stopping streams and retrieving channel information.
     /// </summary>
-    /// <param name="filteredChannels">List of filtered channels (not used for /start endpoint).</param>
+    /// <param name="filteredChannels">List of channels to serve (in this case, all channels without filtering).</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     static async Task StartHttpServer(System.Collections.Generic.List<Channel> filteredChannels)
     {
@@ -371,8 +400,9 @@ class Program
     /// <param name="m3uUrl">The URL of the M3U playlist to download.</param>
     /// <param name="cachePath">The file path to cache the M3U content.</param>
     /// <param name="desiredChannels">Array of desired channel names (not used in this method).</param>
+    /// <param name="isOpenList">Indicates if the list is the open list, to append "(open)" to channel names.</param>
     /// <returns>A task that resolves to a list of parsed Channel objects.</returns>
-    static async Task<System.Collections.Generic.List<Channel>> DownloadAndParseM3u(string m3uUrl, string cachePath, string[] desiredChannels)
+    static async Task<System.Collections.Generic.List<Channel>> DownloadAndParseM3u(string m3uUrl, string cachePath, string[] desiredChannels, bool isOpenList)
     {
         var channels = new System.Collections.Generic.List<Channel>();
         string m3uContent;
@@ -380,13 +410,16 @@ class Program
         try
         {
             Console.WriteLine($"Descargando lista M3U desde {m3uUrl}...");
-            m3uContent = await _httpClient.GetStringAsync(m3uUrl);
+            var response = await _httpClient.GetAsync(m3uUrl);
+            response.EnsureSuccessStatusCode(); // Lanza una excepción si la solicitud falla
+            m3uContent = await response.Content.ReadAsStringAsync();
             File.WriteAllText(cachePath, m3uContent);
             Console.WriteLine("Lista M3U descargada y cacheada.");
         }
-        catch (Exception ex)
+        catch (HttpRequestException ex)
         {
-            Console.WriteLine($"Error al descargar la lista M3U: {ex.Message}");
+            Console.WriteLine($"Error HTTP al descargar la lista M3U: {ex.Message}");
+            Console.WriteLine($"Status Code: {ex.StatusCode}");
             if (File.Exists(cachePath))
             {
                 Console.WriteLine("Usando lista cacheada...");
@@ -394,7 +427,20 @@ class Program
             }
             else
             {
-                throw new Exception("No se pudo descargar la lista M3U y no hay caché disponible.");
+                throw new Exception("No se pudo descargar la lista M3U y no hay caché disponible.", ex);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error general al descargar la lista M3U: {ex.Message}");
+            if (File.Exists(cachePath))
+            {
+                Console.WriteLine("Usando lista cacheada...");
+                m3uContent = File.ReadAllText(cachePath);
+            }
+            else
+            {
+                throw new Exception("No se pudo descargar la lista M3U y no hay caché disponible.", ex);
             }
         }
 
@@ -408,14 +454,20 @@ class Program
                 var tvgChnoMatch = Regex.Match(lines[i], @"tvg-chno=""([^""]+)""");
                 var tvgLogoMatch = Regex.Match(lines[i], @"tvg-logo=""([^""]+)""");
 
-                if (tvgNameMatch.Success && i + 2 < lines.Length)
+                if (tvgNameMatch.Success && i + 1 < lines.Length)
                 {
                     string tvgName = tvgNameMatch.Groups[1].Value.Trim();
+                    // Append "(open)" to the channel name if it's from the open list
+                    if (isOpenList)
+                    {
+                        tvgName = $"{tvgName} (open)";
+                    }
                     string tvgId = tvgIdMatch.Success ? tvgIdMatch.Groups[1].Value.Trim() : string.Empty;
                     string tvgChno = tvgChnoMatch.Success ? tvgChnoMatch.Groups[1].Value.Trim() : string.Empty;
                     string tvgLogo = tvgLogoMatch.Success ? tvgLogoMatch.Groups[1].Value.Trim() : string.Empty;
 
-                    if (lines[i + 1].StartsWith("#EXTVLCOPT"))
+                    // Check for #EXTVLCOPT (used in OpenWebif format)
+                    if (i + 2 < lines.Length && lines[i + 1].StartsWith("#EXTVLCOPT"))
                     {
                         string url = lines[i + 2].Trim();
 
@@ -439,9 +491,30 @@ class Program
 
                         i += 2;
                     }
+                    // Standard M3U format (used by the open list)
                     else
                     {
-                        Console.WriteLine($"Formato inesperado para el canal '{tvgName}': no se encontró #EXTVLCOPT.");
+                        string url = lines[i + 1].Trim();
+
+                        if (!string.IsNullOrEmpty(url) && (url.StartsWith("http://") || url.StartsWith("https://")))
+                        {
+                            var channel = new Channel
+                            {
+                                TvgName = tvgName,
+                                TvgId = tvgId,
+                                TvgChno = tvgChno,
+                                TvgLogo = tvgLogo,
+                                Url = url
+                            };
+                            channels.Add(channel);
+                            Console.WriteLine($"[DEBUG] Canal parseado: {tvgName}, Logo: {tvgLogo}, URL: {url}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"URL inválida para el canal '{tvgName}': {url}");
+                        }
+
+                        i += 1;
                     }
                 }
                 else
