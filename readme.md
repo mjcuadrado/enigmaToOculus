@@ -5,7 +5,7 @@
 
 ### Descripción
 
-Este proyecto es un backend diseñado para descargar listas de canales IPTV en formato M3U, parsearlas y transmitir los canales a través de GStreamer, sirviendo los streams a un frontend a través de un servidor HTTP. Soporta dos fuentes de listas M3U: una lista local (por ejemplo, desde un receptor Enigma2) y una lista abierta (por ejemplo, canales públicos de TDT).
+Este proyecto es un backend diseñado para descargar listas de canales IPTV en formato M3U, parsearlas y transmitir los canales a través de GStreamer, sirviendo los streams a un frontend a través de un servidor HTTP. Soporta dos fuentes de listas M3U: una lista local (por ejemplo, desde un receptor Enigma2) y una lista abierta (por ejemplo, canales públicos de TDT). Además, incluye un frontend web que permite a los usuarios controlar la API y gestionar los canales de manera sencilla.
 
 ### Características
 
@@ -21,6 +21,7 @@ Este proyecto es un backend diseñado para descargar listas de canales IPTV en fo
   - `/channels`: Devuelve la lista completa de canales disponibles.
 - Cachea las listas M3U para usarlas en caso de fallos de red.
 - Maneja errores de descarga de listas M3U de manera robusta, permitiendo que el backend continúe funcionando incluso si una de las listas no está disponible.
+- Incluye un **frontend web** en el puerto `6678` para controlar la API y gestionar los canales de manera intuitiva.
 
 ### Requisitos previos
 
@@ -30,6 +31,7 @@ Este proyecto es un backend diseñado para descargar listas de canales IPTV en fo
 - **.NET Core SDK** (si no usas Docker): Necesario para compilar y ejecutar el backend.
 - Acceso a internet para descargar la lista abierta (`OPEN_M3U_URL`).
 - Un receptor Enigma2 (como un decodificador de satélite) accesible en la red local para la lista `M3U_URL`.
+- Un navegador web para acceder al frontend en el puerto `6678`.
 
 ### Configuración
 
@@ -51,11 +53,11 @@ El backend se configura mediante las siguientes variables de entorno:
    ```yaml
    version: '3.8'
    services:
-     enigmaToOculus:
-       image: enigmaToOculus:latest
+     enigmaToOculus-backend:
+       image: enigmaToOculus-backend:latest
        build:
          context: .
-         dockerfile: Dockerfile
+         dockerfile: Dockerfile.backend
        environment:
          - M3U_URL=http://192.168.1.100/web/services.m3u?...
          - OPEN_M3U_URL=https://www.tdtchannels.com/lists/tv.m3u
@@ -66,9 +68,19 @@ El backend se configura mediante las siguientes variables de entorno:
        volumes:
          - ./cache:/cache
          - ./output:/output
+
+     enigmaToOculus-frontend:
+       image: enigmaToOculus-frontend:latest
+       build:
+         context: ./frontend
+         dockerfile: Dockerfile.frontend
+       ports:
+         - "6678:6678"
+       depends_on:
+         - enigmaToOculus-backend
    ```
 
-2. **Crea un archivo `Dockerfile`** (si no lo tienes):
+2. **Crea un archivo `Dockerfile.backend`** para el backend (si no lo tienes):
 
    ```dockerfile
    # Usa una imagen base con .NET Core y GStreamer
@@ -84,7 +96,7 @@ El backend se configura mediante las siguientes variables de entorno:
        gstreamer1.0-libav \
        && rm -rf /var/lib/apt/lists/*
 
-   # Copia el código fuente
+   # Copia el código fuente del backend
    COPY . .
 
    # Compila el proyecto
@@ -111,47 +123,77 @@ El backend se configura mediante las siguientes variables de entorno:
    ENTRYPOINT ["dotnet", "enigmaToOculus.dll"]
    ```
 
-3. **Construye y ejecuta el contenedor**:
+3. **Crea un archivo `Dockerfile.frontend`** para el frontend (ajusta según tu tecnología de frontend, por ejemplo, Node.js):
+
+   ```dockerfile
+   # Usa una imagen base para Node.js (ajusta según tu frontend)
+   FROM node:18-alpine
+   WORKDIR /app
+
+   # Copia los archivos del frontend
+   COPY ./frontend .
+
+   # Instala las dependencias
+   RUN npm install
+
+   # Construye el frontend (si es necesario)
+   RUN npm run build
+
+   # Expone el puerto del frontend
+   EXPOSE 6678
+
+   # Inicia el servidor del frontend
+   CMD ["npm", "start"]
+   ```
+
+   **Nota**: Este `Dockerfile.frontend` es un ejemplo genérico para un frontend basado en Node.js. Ajusta los comandos (`npm run build`, `npm start`, etc.) según la configuración específica de tu frontend.
+
+4. **Construye y ejecuta los contenedores**:
 
    ```bash
    docker-compose up --build -d
    ```
 
-4. **Verifica los logs**:
+5. **Verifica los logs**:
 
-   ```bash
-   docker logs enigmaToOculus
-   ```
+   - Para el backend:
+     ```bash
+     docker logs enigmaToOculus-backend
+     ```
+     Deberías ver mensajes como:
+     ```
+     Descargando lista M3U desde http://192.168.1.100/web/services.m3u?...
+     Lista M3U descargada y cacheada.
+     Total de canales parseados desde OpenWebif: 191
+     Descargando lista M3U desde https://www.tdtchannels.com/lists/tv.m3u...
+     Lista M3U descargada y cacheada.
+     Total de canales parseados desde la lista abierta: X
+     Total de canales combinados: Y
+     Total de canales (sin filtrar): Y
+     Canales parseados:
+     - LA 1
+     - LA 2
+     - ANTENA 3
+     ...
+     - Channel 1 (open)
+     - Channel 2 (open)
+     ...
+     Servidor HTTP iniciado. Escuchando en http://*:6677/
+     ```
 
-   Deberías ver mensajes como:
-
-   ```
-   Descargando lista M3U desde http://192.168.1.100/web/services.m3u?...
-   Lista M3U descargada y cacheada.
-   Total de canales parseados desde OpenWebif: 191
-   Descargando lista M3U desde https://www.tdtchannels.com/lists/tv.m3u...
-   Lista M3U descargada y cacheada.
-   Total de canales parseados desde la lista abierta: X
-   Total de canales combinados: Y
-   Total de canales (sin filtrar): Y
-   Canales parseados:
-   - LA 1
-   - LA 2
-   - ANTENA 3
-   ...
-   - Channel 1 (open)
-   - Channel 2 (open)
-   ...
-   Servidor HTTP iniciado. Escuchando en http://*:6677/
-   ```
+   - Para el frontend:
+     ```bash
+     docker logs enigmaToOculus-frontend
+     ```
+     Deberías ver mensajes indicando que el frontend está sirviendo en el puerto `6678`.
 
 #### Configuración sin Docker
 
 1. **Clona o copia el código fuente**:
 
-   Asegúrate de tener el código del backend en un directorio local.
+   Asegúrate de tener el código del backend y del frontend en directorios locales.
 
-2. **Instala GStreamer**:
+2. **Instala GStreamer** (para el backend):
 
    En Ubuntu/Debian:
 
@@ -160,7 +202,7 @@ El backend se configura mediante las siguientes variables de entorno:
    sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
    ```
 
-3. **Configura las variables de entorno**:
+3. **Configura las variables de entorno para el backend**:
 
    En Linux:
 
@@ -174,20 +216,44 @@ El backend se configura mediante las siguientes variables de entorno:
 4. **Compila y ejecuta el backend**:
 
    ```bash
+   cd backend
    dotnet build -c Release
    cd bin/Release/net6.0
    dotnet enigmaToOculus.dll
    ```
 
-5. **Verifica los logs**:
+5. **Instala y ejecuta el frontend** (ajusta según tu tecnología de frontend, por ejemplo, Node.js):
 
-   Revisa la salida en la consola para confirmar que ambas listas se descargan y parsean correctamente.
+   ```bash
+   cd frontend
+   npm install
+   npm start
+   ```
+
+   Asegúrate de que el frontend esté configurado para escuchar en el puerto `6678`.
+
+6. **Verifica los logs**:
+
+   Revisa la salida en la consola del backend y del frontend para confirmar que ambos servicios están funcionando correctamente.
 
 ### Uso
 
-#### Endpoints del servidor HTTP
+#### Acceso al Frontend
 
-El backend inicia un servidor HTTP en el puerto `6677`. Los siguientes endpoints están disponibles:
+El frontend web está disponible en el puerto `6678`. Puedes acceder a él desde un navegador web para controlar la API y gestionar los canales de manera intuitiva.
+
+- **URL del frontend**: `http://<tu-ip>:6678`  
+  - Ejemplo: `http://192.168.1.165:6678`
+
+El frontend proporciona una interfaz gráfica donde puedes:
+- Ver la lista completa de canales disponibles (de ambas listas M3U).
+- Iniciar el streaming de un canal con un solo clic.
+- Detener el streaming actual.
+- Ver el estado del streaming en tiempo real.
+
+#### Endpoints del servidor HTTP (Backend)
+
+El backend inicia un servidor HTTP en el puerto `6677`. Los siguientes endpoints están disponibles para interactuar directamente con la API (el frontend los utiliza internamente):
 
 - **GET `/start?channel=<nombre_del_canal>`**  
   Inicia el streaming de un canal específico.  
@@ -272,7 +338,7 @@ Este proyecto está licenciado bajo la [Licencia MIT](LICENSE).
 
 ### Description
 
-This project is a backend designed to download IPTV channel lists in M3U format, parse them, and stream the channels using GStreamer, serving the streams to a frontend via an HTTP server. It supports two M3U list sources: a local list (e.g., from an Enigma2 receiver) and an open list (e.g., public TDT channels).
+This project is a backend designed to download IPTV channel lists in M3U format, parse them, and stream the channels using GStreamer, serving the streams to a frontend via an HTTP server. It supports two M3U list sources: a local list (e.g., from an Enigma2 receiver) and an open list (e.g., public TDT channels). Additionally, it includes a web frontend that allows users to control the API and manage channels easily.
 
 ### Features
 
@@ -288,6 +354,7 @@ This project is a backend designed to download IPTV channel lists in M3U format,
   - `/channels`: Returns the full list of available channels.
 - Caches M3U lists for use in case of network failures.
 - Robustly handles M3U list download errors, allowing the backend to continue running even if one of the lists is unavailable.
+- Includes a **web frontend** on port `6678` to control the API and manage channels intuitively.
 
 ### Prerequisites
 
@@ -297,6 +364,7 @@ This project is a backend designed to download IPTV channel lists in M3U format,
 - **.NET Core SDK** (if not using Docker): Required to build and run the backend.
 - Internet access to download the open list (`OPEN_M3U_URL`).
 - An Enigma2 receiver (such as a satellite decoder) accessible on the local network for the `M3U_URL` list.
+- A web browser to access the frontend on port `6678`.
 
 ### Setup
 
@@ -318,11 +386,11 @@ The backend is configured using the following environment variables:
    ```yaml
    version: '3.8'
    services:
-     enigmaToOculus:
-       image: enigmaToOculus:latest
+     enigmaToOculus-backend:
+       image: enigmaToOculus-backend:latest
        build:
          context: .
-         dockerfile: Dockerfile
+         dockerfile: Dockerfile.backend
        environment:
          - M3U_URL=http://192.168.1.100/web/services.m3u?...
          - OPEN_M3U_URL=https://www.tdtchannels.com/lists/tv.m3u
@@ -333,9 +401,19 @@ The backend is configured using the following environment variables:
        volumes:
          - ./cache:/cache
          - ./output:/output
+
+     enigmaToOculus-frontend:
+       image: enigmaToOculus-frontend:latest
+       build:
+         context: ./frontend
+         dockerfile: Dockerfile.frontend
+       ports:
+         - "6678:6678"
+       depends_on:
+         - enigmaToOculus-backend
    ```
 
-2. **Create a `Dockerfile`** (if you don’t already have one):
+2. **Create a `Dockerfile.backend` for the backend** (if you don’t already have one):
 
    ```dockerfile
    # Use a base image with .NET Core and GStreamer
@@ -351,7 +429,7 @@ The backend is configured using the following environment variables:
        gstreamer1.0-libav \
        && rm -rf /var/lib/apt/lists/*
 
-   # Copy the source code
+   # Copy the backend source code
    COPY . .
 
    # Build the project
@@ -378,47 +456,77 @@ The backend is configured using the following environment variables:
    ENTRYPOINT ["dotnet", "enigmaToOculus.dll"]
    ```
 
-3. **Build and run the container**:
+3. **Create a `Dockerfile.frontend` for the frontend** (adjust based on your frontend technology, e.g., Node.js):
+
+   ```dockerfile
+   # Use a base image for Node.js (adjust based on your frontend)
+   FROM node:18-alpine
+   WORKDIR /app
+
+   # Copy the frontend files
+   COPY ./frontend .
+
+   # Install dependencies
+   RUN npm install
+
+   # Build the frontend (if necessary)
+   RUN npm run build
+
+   # Expose the frontend port
+   EXPOSE 6678
+
+   # Start the frontend server
+   CMD ["npm", "start"]
+   ```
+
+   **Note**: This `Dockerfile.frontend` is a generic example for a Node.js-based frontend. Adjust the commands (`npm run build`, `npm start`, etc.) based on your specific frontend setup.
+
+4. **Build and run the containers**:
 
    ```bash
    docker-compose up --build -d
    ```
 
-4. **Check the logs**:
+5. **Check the logs**:
 
-   ```bash
-   docker logs enigmaToOculus
-   ```
+   - For the backend:
+     ```bash
+     docker logs enigmaToOculus-backend
+     ```
+     You should see messages like:
+     ```
+     Downloading M3U list from http://192.168.1.100/web/services.m3u?...
+     M3U list downloaded and cached.
+     Total channels parsed from OpenWebif: 191
+     Downloading M3U list from https://www.tdtchannels.com/lists/tv.m3u...
+     M3U list downloaded and cached.
+     Total channels parsed from the open list: X
+     Total combined channels: Y
+     Total channels (unfiltered): Y
+     Parsed channels:
+     - LA 1
+     - LA 2
+     - ANTENA 3
+     ...
+     - Channel 1 (open)
+     - Channel 2 (open)
+     ...
+     HTTP server started. Listening on http://*:6677/
+     ```
 
-   You should see messages like:
-
-   ```
-   Downloading M3U list from http://192.168.1.100/web/services.m3u?...
-   M3U list downloaded and cached.
-   Total channels parsed from OpenWebif: 191
-   Downloading M3U list from https://www.tdtchannels.com/lists/tv.m3u...
-   M3U list downloaded and cached.
-   Total channels parsed from the open list: X
-   Total combined channels: Y
-   Total channels (unfiltered): Y
-   Parsed channels:
-   - LA 1
-   - LA 2
-   - ANTENA 3
-   ...
-   - Channel 1 (open)
-   - Channel 2 (open)
-   ...
-   HTTP server started. Listening on http://*:6677/
-   ```
+   - For the frontend:
+     ```bash
+     docker logs enigmaToOculus-frontend
+     ```
+     You should see messages indicating that the frontend is serving on port `6678`.
 
 #### Setup without Docker
 
 1. **Clone or copy the source code**:
 
-   Ensure you have the backend code in a local directory.
+   Ensure you have the backend and frontend code in local directories.
 
-2. **Install GStreamer**:
+2. **Install GStreamer** (for the backend):
 
    On Ubuntu/Debian:
 
@@ -427,7 +535,7 @@ The backend is configured using the following environment variables:
    sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
    ```
 
-3. **Set up environment variables**:
+3. **Set up environment variables for the backend**:
 
    On Linux:
 
@@ -441,20 +549,44 @@ The backend is configured using the following environment variables:
 4. **Build and run the backend**:
 
    ```bash
+   cd backend
    dotnet build -c Release
    cd bin/Release/net6.0
    dotnet enigmaToOculus.dll
    ```
 
-5. **Check the logs**:
+5. **Install and run the frontend** (adjust based on your frontend technology, e.g., Node.js):
 
-   Review the console output to confirm that both M3U lists are downloaded and parsed correctly.
+   ```bash
+   cd frontend
+   npm install
+   npm start
+   ```
+
+   Ensure the frontend is configured to listen on port `6678`.
+
+6. **Check the logs**:
+
+   Review the console output for both the backend and frontend to confirm that both services are running correctly.
 
 ### Usage
 
-#### HTTP Server Endpoints
+#### Accessing the Frontend
 
-The backend starts an HTTP server on port `6677`. The following endpoints are available:
+The web frontend is available on port `6678`. You can access it from a web browser to control the API and manage channels intuitively.
+
+- **Frontend URL**: `http://<your-ip>:6678`  
+  - Example: `http://192.168.1.165:6678`
+
+The frontend provides a graphical interface where you can:
+- View the full list of available channels (from both M3U lists).
+- Start streaming a channel with a single click.
+- Stop the current stream.
+- View the real-time streaming status.
+
+#### HTTP Server Endpoints (Backend)
+
+The backend starts an HTTP server on port `6677`. The following endpoints are available for direct interaction with the API (the frontend uses them internally):
 
 - **GET `/start?channel=<channel_name>`**  
   Starts streaming a specific channel.  
@@ -532,4 +664,3 @@ If you’d like to contribute to the project, please create a *pull request* with 
 ### License
 
 This project is licensed under the [MIT License](LICENSE).
-
